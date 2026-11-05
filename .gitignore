@@ -1,0 +1,16 @@
+# Virtual environment
+venv/
+.venv/
+
+# The raw file that is used to separate the smaller ones
+autoscout24_dataset_20251108.csv
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# Folders
+split_files/
