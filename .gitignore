@@ -14,3 +14,5 @@ __pycache__/
 
 # Folders
 split_files/
+files_for_ingestion/
+processed_files/
