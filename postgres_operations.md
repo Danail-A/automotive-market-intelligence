@@ -6,4 +6,4 @@ a. A Schema for the raw data - CREATE SCHEMA raw;
 b. A schema for semi-transformed data - CREATE SCHEMA staging;
 c. CREATE SCHEMA intermediate;
 d. CREATE SCHEMA marts;
-
+5. Create a user and password in order to connect to python (dbt) later as python needs permission to write into postgres.

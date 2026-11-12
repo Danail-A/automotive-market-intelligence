@@ -4,7 +4,7 @@ venv/
 
 # The raw file that is used to separate the smaller ones
 autoscout24_dataset_20251108.csv
-database.ini
+config.ini
 
 # Python cache
 __pycache__/
@@ -15,4 +15,4 @@ __pycache__/
 
 # Folders
 split_files/
-data/
+data_files/
