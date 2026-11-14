@@ -3,67 +3,103 @@ import re
 import os
 import shutil
 from configparser import ConfigParser
+import pandas as pd
 
 from pathlib import Path
 
 import psycopg2
 from psycopg2 import sql
 
-## File excercises
+## Define the paths
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_FILES = PROJECT_DIR / "data_files"
 UNPROCESSED = DATA_FILES / "files_for_ingestion"
 PROCESSED = DATA_FILES / "processed_files"
 FAILED = DATA_FILES / "failed_files"
+CONFIGFILE = PROJECT_DIR / "config.ini"
 
-unprocessed_files = UNPROCESSED.rglob("*.csv")
+### Necessary constants and variables
 
-def load_csv_to_psql(csv_file, cur, table_name):
-    ## make it check first if a table is already created and if not create one and then execute this again.
+
+TABLE = "raw.autoscout_listings"
+UNPROCESSED_FILES = list(UNPROCESSED.rglob("*.csv"))
+
+### Useful functions
+
+
+def extract_table_columns(files: list) -> list:
+    df = pd.read_csv(files[0])
+    list_of_columns = list(df.columns)
+    list_of_columns = [columns.replace(" ", "_") for columns in list_of_columns]
+    print(f"{len(list_of_columns)} columns found.")
+    return list_of_columns
+
+
+def create_table(cur, list_of_columns: list, table_name: str) -> None:
+
+    string_join = " TEXT, ".join(list_of_columns)
+    string_join = string_join + " TEXT"
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}
+                ({string_join}) """)
+    print(string_join)
+    print(f"Table {table_name} successfully created!")
+
+
+def load_csv_to_psql(
+    csv_file: str,
+    cur,
+    table_name: str,
+    # unprocessed_folder: dir,
+    passed_folder: dir,
+    failed_folder: dir,
+):
     try:
-        with open(csv_file, 'r') as file:
+        with open(csv_file, "r") as file:
             cur.copy_expert(f"COPY {table_name} FROM STDIN WITH CSV HEADER", file)
             print(f"{csv_file} loaded successfully.")
-        shutil.move(UNPROCESSED, PROCESSED)
+        shutil.move(csv_file, passed_folder)
     except (FileNotFoundError, PermissionError, OSError) as e:
         print(f"{csv_file} couldn't load successfully. Error: {e}")
-        shutil.move(UNPROCESSED, FAILED)
+        shutil.move(csv_file, failed_folder)
 
 
-## Configs for PostgreSQL
+def main():
 
-configfile = PROJECT_DIR / "config.ini"
+    ## Configs for PostgreSQL
 
-config = ConfigParser()
+    config = ConfigParser()
+    config.read(CONFIGFILE)
 
-config.read(configfile)
+    ## These variables are unnecessary but I believe they make it a bit more readable?
 
-psql_user = config['postgresql']['user']
-psql_database = config['postgresql']['database']
-psql_password = config['postgresql']['password']
-psql_host = config['postgresql']['host']
-psql_port = config['postgresql']['port']
+    psql_user = config["postgresql"]["user"]
+    psql_database = config["postgresql"]["database"]
+    psql_password = config["postgresql"]["password"]
+    psql_host = config["postgresql"]["host"]
+    psql_port = config["postgresql"]["port"]
 
-### Connection to psql
+    ### Connection to psql and data loading
 
-conn = psycopg2.connect(
-    database=psql_database,
-    user=psql_user,
-    password=psql_password,
-    host=psql_host,
-    port=psql_port
-)
+    conn = psycopg2.connect(
+        database=psql_database,
+        user=psql_user,
+        password=psql_password,
+        host=psql_host,
+        port=psql_port,
+    )
 
-cursor = conn.cursor()
-table = "raw.autoscout_listings"
-cursor.execute(f"SELECT * FROM {table}")
-data = cursor.fetchall()
+    cursor = conn.cursor()
+
+    create_table(cursor, extract_table_columns(UNPROCESSED_FILES), TABLE)
+
+    for file in UNPROCESSED_FILES:
+        load_csv_to_psql(file, cursor, TABLE, PROCESSED, FAILED)
+
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 
-
-# for file in unprocessed_files:
-#     load_csv_to_psql(file, cursor, table)
-
-
-conn.close()
+if __name__ == "__main__":
+    main()
