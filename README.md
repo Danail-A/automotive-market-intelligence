@@ -1,3 +1,7 @@
+### The dataset can be found on this link:
+https://www.kaggle.com/datasets/clkmuhammed/autoscout24-car-listings-dataset
+
+
 # automotive-market-intelligence
 A data project on second hand car prices. The idea is to get familiar with dbt and Airflow. 
 
