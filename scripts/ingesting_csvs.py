@@ -1,6 +1,3 @@
-import csv
-import re
-import os
 import shutil
 from configparser import ConfigParser
 import pandas as pd
@@ -29,21 +26,26 @@ UNPROCESSED_FILES = list(UNPROCESSED.rglob("*.csv"))
 
 
 def extract_table_columns(files: list) -> list:
-    df = pd.read_csv(files[0])
-    list_of_columns = list(df.columns)
-    list_of_columns = [columns.replace(" ", "_") for columns in list_of_columns]
-    print(f"{len(list_of_columns)} columns found.")
-    return list_of_columns
+    try:
+        df = pd.read_csv(files[0])
+        list_of_columns = list(df.columns)
+        list_of_columns = [columns.replace(" ", "_") for columns in list_of_columns]
+        print(f"{len(list_of_columns)} columns found.")
+        return list_of_columns
+    except IndexError:
+        print("There are no unprocessed files.")
 
 
 def create_table(cur, list_of_columns: list, table_name: str) -> None:
-
-    string_join = " TEXT, ".join(list_of_columns)
-    string_join = string_join + " TEXT"
-    cur.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}
-                ({string_join}) """)
-    print(string_join)
-    print(f"Table {table_name} successfully created!")
+    try:
+        string_join = " TEXT, ".join(list_of_columns)
+        string_join = string_join + " TEXT"
+        cur.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}
+                    ({string_join}) """)
+        # print(string_join)
+        print(f"Table {table_name} successfully created!")
+    except TypeError:
+        ...
 
 
 def load_csv_to_psql(
