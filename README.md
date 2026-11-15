@@ -1,4 +1,4 @@
-#### The dataset can be found on this link:
+# The dataset can be found on this link:
 https://www.kaggle.com/datasets/clkmuhammed/autoscout24-car-listings-dataset
 
 
@@ -37,9 +37,9 @@ Step
 11	Introduce Airflow
 
 
-### First steps to be done - This is what needs to be done for step number one and step number two to be completed.
+## First steps to be done - This is what needs to be done for step number one and step number two to be completed.
 
-## Added coments after the list are explanations after implementation or for better understanding and more granular information.
+#### Added coments after the list are explanations after implementation or for better understanding and more granular information.
 
 1. Create a database called automotive_market_intelligence. ##  done manually - more information in postgres_operations.md
 2. Create the four schemas: raw, staging, intermediate, marts.  ##  done manually - more information in postgres_operations.md
