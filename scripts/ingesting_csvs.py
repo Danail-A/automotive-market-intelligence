@@ -37,13 +37,15 @@ def extract_table_columns(files: list) -> list:
 
 
 def create_table(cur, list_of_columns: list, table_name: str) -> None:
+    # Added a try and except clause as if there is no files this function will raise a TypeError. 
+
     try:
         string_join = " TEXT, ".join(list_of_columns)
         string_join = string_join + " TEXT"
         cur.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}
                     ({string_join}) """)
-        # print(string_join)
         print(f"Table {table_name} successfully created!")
+    # This just lets the function continue in case a typeerror is raised. Not sure if this cannot be handled better.
     except TypeError:
         ...
 
