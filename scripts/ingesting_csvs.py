@@ -37,8 +37,8 @@ def extract_table_columns(files: list) -> list:
 
 
 def create_table(cur, list_of_columns: list, table_name: str) -> None:
-    # Added a try and except clause as if there is no files this function will raise a TypeError. 
-
+    
+    # Added a try and except clause as if there is no files this function will raise a TypeError.
     try:
         string_join = " TEXT, ".join(list_of_columns)
         string_join = string_join + " TEXT"
@@ -51,7 +51,7 @@ def create_table(cur, list_of_columns: list, table_name: str) -> None:
 
 
 def load_csv_to_psql(
-    csv_file: str,
+    csv_file: Path,
     cur,
     table_name: str,
     # unprocessed_folder: dir,
@@ -61,10 +61,10 @@ def load_csv_to_psql(
     try:
         with open(csv_file, "r") as file:
             cur.copy_expert(f"COPY {table_name} FROM STDIN WITH CSV HEADER", file)
-            print(f"{csv_file} loaded successfully.")
+            print(f"loading {csv_file.name}...")
         shutil.move(csv_file, passed_folder)
-    except (FileNotFoundError, PermissionError, OSError) as e:
-        print(f"{csv_file} couldn't load successfully. Error: {e}")
+    except (FileNotFoundError, PermissionError, OSError, psycopg2.errors.BadCopyFileFormat) as e:
+        print(f"{csv_file.name} couldn't load successfully. Error: {e}")
         shutil.move(csv_file, failed_folder)
 
 
@@ -97,13 +97,33 @@ def main():
 
     create_table(cursor, extract_table_columns(UNPROCESSED_FILES), TABLE)
 
+    rows_commited = 0
     for file in UNPROCESSED_FILES:
+        df = pd.read_csv(file)
+        file_rows = int(df.shape[0])
         load_csv_to_psql(file, cursor, TABLE, PROCESSED, FAILED)
+        copied_rows = cursor.rowcount
+        if file_rows == copied_rows:
+            conn.commit()
+            print(f"{file_rows} rows were in the file. {copied_rows} were loaded.")
+            print(f"{file.name} commit to {TABLE}")
+            rows_commited += file_rows
+        else:
+            conn.rollback()
+            print(f"{file_rows} rows were in the file. {copied_rows} were loaded.")
+            print(f"{file.name} was not commited to {TABLE} due to mismatch. Please check again!")
+    print(f"{rows_commited} total rows were commited!")
 
-    conn.commit()
+
     cursor.close()
     conn.close()
 
 
+
 if __name__ == "__main__":
     main()
+
+
+# TODO: Every file should say how many rows it has and store how many nulls it has per column. 
+# We should check and compare how many rows have been ingested and missing values per column.
+# We should compare the two things on a file level and commit the copy when we know the data is matching.
