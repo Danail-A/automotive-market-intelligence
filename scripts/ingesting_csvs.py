@@ -4,6 +4,7 @@ import pandas as pd
 from pathlib import Path
 import psycopg2
 import hashlib
+import datetime
 
 
 ## Define the paths
@@ -46,14 +47,14 @@ def create_table(cur, list_of_columns: tuple, table_name: str) -> None:
         print(f"Table {table_name} is ready for use!")
     # This just lets the function continue in case a typeerror is raised. Not sure if this cannot be handled better.
     except TypeError:
-        ...
+        print(f"Table {table_name} has issues. Please check!")
 
 
 def load_csv_to_psql(
     csv_file: Path,
     cur,
     table_name: str,
-):
+) -> None:
     try:
         with open(csv_file, "r") as file:
             cur.copy_expert(f"COPY {table_name} FROM STDIN WITH CSV HEADER", file)
@@ -62,7 +63,7 @@ def load_csv_to_psql(
         print(f"{csv_file.name} couldn't load successfully. Error: {e}")
 
 
-def compute_hash_file(file_path: Path, algorithm='sha256'):
+def compute_hash_file(file_path: Path, algorithm='sha256') -> str:
 
     # Here we will compute the hash of a file in chunks of 8192 bytes
     hash_func = hashlib.new(algorithm)
@@ -74,12 +75,40 @@ def compute_hash_file(file_path: Path, algorithm='sha256'):
     return hash_func.hexdigest()
 
 
-def log_metadata():
-    ...
+def load_imported_files_for_check(cur, columns: list, table_name: str) -> list[tuple]:
+
+    try:
+        string_join = ", ".join(columns)
+        cur.execute(f"""SELECT {string_join}
+                        FROM {table_name}
+                        WHERE status = 'SUCCESS'""")
+        query_output = cur.fetchall()
+        instances = cur.rowcount
+        print(f"{len(columns)} clumns and {instances} rows have been loaded.")
+        return query_output
+    except TypeError as e:
+        print(f"An error has occured inside the load_imported_files_for_check function. Error: {e}")
 
 
-def validate_file():
-    ...
+def validate_file(loaded_files: list[tuple], value_to_compare: str) -> bool:
+
+    result = [row[0] for row in loaded_files]
+    if value_to_compare in result:
+        print("The file has already been processed and loaded.")
+        return False
+    else:
+        print("File has not been processed before. Continue...")
+        return True
+
+
+def add_metadata_values(cur, list_of_values: list, table_name: str) -> None:
+
+    try:
+        string_join = ", ".join(list_of_values)
+        cur.execute(f"""INSERT INTO {table_name}
+                        VALUES ({string_join})""")
+    except:
+        ...
 
 
 def main():
@@ -111,40 +140,74 @@ def main():
 
     cursor = conn.cursor()
 
+    ## Check if the tables are ready.
+
     create_table(cursor, MANDATORY_STRUCTURE, TABLE)
+    create_table(cursor, list_of_columns=("file_hash", "file_name", "status", "rows_loaded", "processed_at"), table_name="raw.metadata_ingestion_log")
 
     rows_commited = 0
     if not UNPROCESSED_FILES:
         print("There are no unprocessed files.")
     else:        
         for file in UNPROCESSED_FILES:
-                ## Check column structure and if it matches the mandatory structure
+
+            # Create an empty varaible that will later be added in the logging table.
+            status = ""
+            
+            ## Compute the hash
+            file_hash = compute_hash_file(file)
+            file_name = file.name
+
+            ## Load the metadata of the file that have already been loaded.
+            imported_files = load_imported_files_for_check(cursor, columns=["file_hash"], table_name="raw.metadata_ingestion_log")
+
+            ##Validate if the file has already been added
+            file_unprocessed = validate_file(imported_files, file_hash)
+
+            ## Check column structure and if it matches the mandatory structure
             df = pd.read_csv(file)
             file_columns = tuple(df.columns)
             file_rows = int(df.shape[0])
 
+            ## Execute the logic. First check if the file has been processed before. 
+            ## Second check is to see if the structure is the needed structure for copy.
+            ## Then check if all the rows have been copied before commiting.
             load_csv_to_psql(file, cursor, TABLE)
             copied_rows = cursor.rowcount
-
-            if file_columns == MANDATORY_STRUCTURE:
-                if file_rows == copied_rows:
-                    conn.commit()
-                    print(f"{file_rows} rows were in the file. {copied_rows} were loaded.")
-                    print(f"{file.name} commit to {TABLE}")
-                    rows_commited += file_rows
-                    shutil.move(file, PROCESSED)
-                    print(f"{file.name} has been moved to [processed_files]")
+            if file_unprocessed:
+                if file_columns == MANDATORY_STRUCTURE:
+                    if file_rows == copied_rows:
+                        conn.commit()
+                        print(f"{file_rows} rows were in the file. {copied_rows} were loaded.")
+                        print(f"{file_name} commit to {TABLE}")
+                        rows_commited += file_rows
+                        shutil.move(file, PROCESSED)
+                        print(f"{file_name} has been moved to [processed_files]")
+                        status = "SUCCESS"
+                    else:
+                        conn.rollback()
+                        print(f"{file_rows} rows were in the file. {copied_rows} were loaded.")
+                        print(f"{file_name} was not commited to {TABLE} due to mismatch. Please check again!")
+                        shutil.move(file, FAILED)
+                        print(f"{file_name} has been moved to [failed_files]")
+                        status = "FAILED"
+                        copied_rows = 0
                 else:
                     conn.rollback()
-                    print(f"{file_rows} rows were in the file. {copied_rows} were loaded.")
-                    print(f"{file.name} was not commited to {TABLE} due to mismatch. Please check again!")
+                    print(f"{file_name}'s columns do not match the mandatory structure. Commit has been rolled back.")
                     shutil.move(file, FAILED)
-                    print(f"{file.name} has been moved to [failed_files]")
+                    print(f"{file_name} has been moved to [failed_files]")
+                    status = "FAILED"
+                    copied_rows = 0
             else:
-                conn.rollback()
-                print(f"{file.name}'s columns do not match the mandatory structure. Commit has been rolled back.")
+                print(f"{file_name} has already been processed.")
                 shutil.move(file, FAILED)
-                print(f"{file.name} has been moved to [failed_files]")
+                print(f"{file_name} has been moved to [failed_files]")
+                status = "FAILED/PROCESSED"
+                copied_rows = 0
+
+            timestamp = datetime.datetime.now()
+            add_metadata_values(cursor, table_name="raw.metadata_ingestion_log", list_of_values=[file_hash, file_name, status, copied_rows, timestamp])
         print(f"{rows_commited} total rows were commited!")
 
 
