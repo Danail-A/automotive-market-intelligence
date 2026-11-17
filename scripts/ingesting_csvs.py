@@ -25,7 +25,7 @@ EXAMPLE_FILE = Path(__file__).resolve().parent.parent / "split_files" / "part_1.
 ### Useful functions
 
 
-def extract_table_columns(file: list) -> tuple:
+def extract_table_columns(file: Path) -> tuple:
     try:
         df = pd.read_csv(file)
         list_of_columns = list(df.columns)
@@ -52,6 +52,7 @@ def create_table(cur, list_of_columns: tuple, table_name: str) -> None:
 
 def load_csv_to_psql(
     csv_file: Path,
+    connection,
     cur,
     table_name: str,
 ) -> None:
@@ -61,10 +62,17 @@ def load_csv_to_psql(
             print(f"loading {csv_file.name}...")
     except (FileNotFoundError, PermissionError, OSError, psycopg2.errors.BadCopyFileFormat) as e:
         print(f"{csv_file.name} couldn't load successfully. Error: {e}")
+        connection.rollback()
+        cur.close
     except psycopg2.errors.InFailedSqlTransaction as e:
         print(f"There are no values inside the table yet. Error: {e}")
+        connection.rollback()
+        cur.close
     except psycopg2.errors.CharacterNotInRepertoire as e:
         print(f"{csv_file.name} file contains symbols that are not supported. Error: {e}")
+        connection.rollback()
+        cur.close
+
 
 
 def compute_hash_file(file_path: Path, algorithm='sha256') -> str:
@@ -151,6 +159,7 @@ def main():
 
     create_table(cursor, MANDATORY_STRUCTURE, TABLE)
     create_table(cursor, list_of_columns=("file_hash", "file_name", "status", "rows_loaded", "processed_at"), table_name="raw.metadata_ingestion_log")
+    conn.commit()
 
     rows_commited = 0
     if not UNPROCESSED_FILES:
@@ -165,22 +174,22 @@ def main():
             ## Load the metadata of the file that have already been loaded.
             imported_files = load_imported_files_for_check(
             cur=cursor,
-            columns=["file_hash", "file_name", "status", "rows_loaded", "processed_at"],
+            columns=["file_hash"],
             table_name="raw.metadata_ingestion_log")
 
             ## Check column structure and if it matches the mandatory structure
             df = pd.read_csv(file)
-            file_columns = tuple(df.columns)
+            file_columns = extract_table_columns(file)
             file_rows = int(df.shape[0])
 
             ## Execute the logic. First check if the file has been processed before. 
             ## Second check is to see if the structure is the needed structure for copy.
             ## Then check if all the rows have been copied before commiting.
-            load_csv_to_psql(file, cursor, TABLE)
-            copied_rows = cursor.rowcount
 
             if validate_file(imported_files, file_hash):
                 if file_columns == MANDATORY_STRUCTURE:
+                    load_csv_to_psql(file, conn, cursor, TABLE)
+                    copied_rows = cursor.rowcount
                     if file_rows == copied_rows:
                         conn.commit()
                         print(f"{file_rows} rows were in the file. {copied_rows} were loaded.")
@@ -205,8 +214,7 @@ def main():
                         status = "FAILED"
                         copied_rows = "0"
                 else:
-                    conn.rollback()
-                    print(f"{file_name}'s columns do not match the mandatory structure. Commit has been rolled back.")
+                    print(f"{file_name}'s columns do not match the mandatory structure.")
                     try:
                         shutil.move(file, FAILED)
                     except shutil.Error:
@@ -215,7 +223,6 @@ def main():
                     status = "FAILED"
                     copied_rows = "0"
             else:
-                conn.rollback()
                 try:
                     shutil.move(file, FAILED)
                 except shutil.Error:
@@ -228,6 +235,7 @@ def main():
             add_metadata_values(cursor, 
                                 table_name="raw.metadata_ingestion_log",
                                 list_of_values=[file_hash, file_name, str(status), copied_rows, timestamp])
+            print("A record has been added to the metadata folder.")
             conn.commit()
 
         print(f"{rows_commited} total rows were commited!")
